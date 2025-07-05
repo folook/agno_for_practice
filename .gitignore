@@ -43,6 +43,7 @@ venv*
 agnoenv*
 aienv*
 phienv*
+VENV*
 
 # ignore tmp dirs
 scratch
