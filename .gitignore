@@ -16,6 +16,7 @@
 .idea
 .vscode
 *.code-workspace
+.run
 
 # Ignore .env files
 .env

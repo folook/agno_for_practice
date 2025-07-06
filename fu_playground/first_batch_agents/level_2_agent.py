@@ -1,10 +1,12 @@
+from http.cookiejar import debug
+
 from agno.agent import Agent
 from agno.embedder.openai import OpenAIEmbedder
 from agno.knowledge.url import UrlKnowledge
 from agno.models.anthropic import Claude
 from agno.storage.sqlite import SqliteStorage
 from agno.vectordb.lancedb import LanceDb, SearchType
-
+# with knowledge and storage
 # Load Agno documentation in a knowledge base
 # You can also use `https://docs.agno.com/llms-full.txt` for the full documentation
 knowledge = UrlKnowledge(
@@ -25,8 +27,8 @@ agent = Agent(
     name="Agno Assist",
     model=Claude(id="claude-sonnet-4-20250514"),
     instructions=[
-        "Search your knowledge before answering the question.",
-        "Only include the output in your response. No other text.",
+        "在回答问题前，先搜索你的知识储备。",
+        "仅包含输出内容于回复中。勿添加其他文字。",
     ],
     knowledge=knowledge,
     storage=storage,
@@ -42,4 +44,4 @@ if __name__ == "__main__":
     # Load the knowledge base, comment out after first run
     # Set recreate to True to recreate the knowledge base if needed
     agent.knowledge.load(recreate=False)
-    agent.print_response("What is Agno?", stream=True)
+    agent.print_response("再次回答。 回答要简单，不要超过 20 个字", stream=False , debug=True, session_id='8ea0e721-6cdc-48c1-ab6f-489dbf18ed89')
