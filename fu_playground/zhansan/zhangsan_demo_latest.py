@@ -63,16 +63,17 @@ class RAGWorkflow(Workflow):
             show_tool_calls=True
         )
 
-        # 2. Analyzer Agent - 专门负责信息分析
+        # 2. Analyzer Agent - 专门负责信息分析和规划
         self.analyzer = Agent(
             name="🧠 Analyzer",
             model=OpenAIChat(id="gpt-4"),
             instructions="""
-            你是一个信息分析专家。你的任务是：
+            你是一个信息分析和规划专家。你的任务是：
             1. 分析所有检索历史，判断是否足够回答用户问题
             2. 识别信息中的引用关系（如"和XX相同"、"和XX一样"、"喜欢XX"等）
             3. 追踪完整的推理链，判断是否需要进一步查询
             4. 避免重复查询已经查询过的内容
+            5. 基于分析结果直接决定下一步行动
 
             重要：仔细分析所有检索结果，建立完整的推理链。
             例如：如果A和B相同，B和C一样，那么需要查询C的具体内容才能知道A的具体内容。
@@ -82,28 +83,14 @@ class RAGWorkflow(Workflow):
                 "sufficient": true/false,
                 "reasoning": "分析原因，包括推理链分析",
                 "missing_info": "缺少什么信息（如果不充足）",
-                "next_query": "下一步应该查询什么（如果需要）"
+                "next_query": "下一步应该查询什么（如果需要）",
+                "decision": "ANSWER 或 RETRIEVE"
             }
             """,
             markdown=False
         )
 
-        # 3. Planner Agent - 专门负责决策和规划
-        self.planner = Agent(
-            name="📋 Planner",
-            model=OpenAIChat(id="gpt-4"),
-            instructions="""
-            你是一个决策规划专家。基于分析结果决定下一步行动：
-            1. 如果信息充足：准备最终答案
-            2. 如果信息不足：规划下一步查询
-            3. 跟踪查询历史，避免重复查询
-
-            直接返回决策结果，格式清晰简洁。
-            """,
-            markdown=True
-        )
-
-        # 4. Final Answer Agent - 负责生成最终答案
+        # 3. Final Answer Agent - 负责生成最终答案
         self.answerer = Agent(
             name="✅ Final Answer",
             model=OpenAIChat(id="gpt-4"),
@@ -122,7 +109,7 @@ class RAGWorkflow(Workflow):
         """执行信息检索"""
         self.console.print(Panel(
             f"[bold cyan]执行检索:[/bold cyan] {query}",
-            title=f"🔍 第 {self.iteration_count + 1} 轮检索",
+            title=f"🔍 第 {len(self.retrieval_history) + 1} 轮检索",
             border_style="cyan"
         ))
 
@@ -137,7 +124,7 @@ class RAGWorkflow(Workflow):
 
         # 记录检索历史
         self.retrieval_history.append({
-            "iteration": self.iteration_count + 1,
+            "iteration": len(self.retrieval_history) + 1,
             "query": query,
             "result": result,
             "timestamp": datetime.now().strftime("%H:%M:%S")
@@ -148,7 +135,7 @@ class RAGWorkflow(Workflow):
 
     # 包装 analyzer
     def _analyze_info(self, question: str, all_retrieval_history: List[Dict]) -> Dict:
-        """分析信息完整性"""
+        """分析信息完整性并规划下一步行动"""
         # 构建所有历史检索结果的显示
         history_display = "\n".join([
             f"第{item['iteration']}轮: {item['query']} -> {item['result']}"
@@ -156,15 +143,15 @@ class RAGWorkflow(Workflow):
         ])
 
         self.console.print(Panel(
-            f"[bold yellow]分析信息完整性[/bold yellow]\n"
+            f"[bold yellow]分析信息完整性并规划下一步[/bold yellow]\n"
             f"原始问题: {question}\n"
             f"所有检索历史:\n{history_display}",
-            title="🧠 信息分析",
+            title="🧠 信息分析与规划",
             border_style="yellow"
         ))
 
         analysis_prompt = f"""
-        分析以下信息是否足够回答用户问题：
+        分析以下信息是否足够回答用户问题，并规划下一步行动：
 
         用户问题：{question}
 
@@ -188,12 +175,13 @@ class RAGWorkflow(Workflow):
                 "sufficient": False,
                 "reasoning": "需要进一步分析",
                 "missing_info": "未知",
-                "next_query": None
+                "next_query": None,
+                "decision": "RETRIEVE"
             }
 
         # 记录分析历史
         self.analysis_history.append({
-            "iteration": self.iteration_count + 1,
+            "iteration": len(self.analysis_history) + 1, # Changed to len(self.analysis_history) + 1
             "analysis": analysis_result,
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
@@ -207,27 +195,15 @@ class RAGWorkflow(Workflow):
             self.console.print(f"[dim]缺失信息:[/dim] {analysis_result.get('missing_info', 'N/A')}")
             self.console.print(f"[dim]建议查询:[/dim] {analysis_result.get('next_query', 'N/A')}")
 
-        self.console.print("")
-        return analysis_result
-
-    def _plan_next_step(self, analysis: Dict) -> str:
-        """规划下一步行动"""
-        self.console.print(Panel(
-            "[bold magenta]规划下一步行动[/bold magenta]",
-            title="📋 决策规划",
-            border_style="magenta"
-        ))
-
-        if analysis.get("sufficient"):
-            decision = "ANSWER"
+        # 显示决策结果
+        decision = analysis_result.get("decision", "RETRIEVE")
+        if decision == "ANSWER":
             self.console.print("[green]决策: 信息充足，准备生成最终答案[/green]\n")
         else:
-            decision = f"RETRIEVE:{analysis.get('next_query', '')}"
-            self.console.print(f"[yellow]决策: 需要进一步检索 - {analysis.get('next_query', 'N/A')}[/yellow]\n")
+            self.console.print(f"[yellow]决策: 需要进一步检索 - {analysis_result.get('next_query', 'N/A')}[/yellow]\n")
 
-        return decision
+        return analysis_result
 
-    # 包装 answer
     def _generate_final_answer(self, question: str, all_info: List[Dict]) -> str:
         """生成最终答案"""
         self.console.print(Panel(
@@ -297,16 +273,14 @@ class RAGWorkflow(Workflow):
         # 初始化
         self.retrieval_history = []
         self.analysis_history = []
-        self.iteration_count = 0
         current_info = ""
 
         # 主循环 - 最多5轮迭代
-        while self.iteration_count < 5:
-            self.iteration_count += 1
-            self.console.print(f"[bold cyan]--- 第 {self.iteration_count} 轮迭代 ---[/bold cyan]\n")
+        for iteration in range(1, 6):
+            self.console.print(f"[bold cyan]--- 第 {iteration} 轮迭代 ---[/bold cyan]\n")
 
             # Step 1: 检索信息
-            if self.iteration_count == 1:
+            if iteration == 1:
                 query = message
             else:
                 # 从上一轮分析中获取查询建议
@@ -319,11 +293,8 @@ class RAGWorkflow(Workflow):
             # Step 2: 分析信息
             analysis = self._analyze_info(message, self.retrieval_history)
 
-            # Step 3: 规划下一步
-            decision = self._plan_next_step(analysis)
-
-            # Step 4: 根据决策执行
-            if decision == "ANSWER":
+            # Step 3: 根据决策执行
+            if analysis.get("decision") == "ANSWER":
                 # 生成最终答案
                 final_answer = self._generate_final_answer(message, self.retrieval_history)
 
@@ -335,7 +306,7 @@ class RAGWorkflow(Workflow):
                     run_id=self.run_id,
                     content=final_answer
                 )
-            elif decision.startswith("RETRIEVE:"):
+            elif analysis.get("decision") == "RETRIEVE":
                 # 继续下一轮检索
                 continue
 
